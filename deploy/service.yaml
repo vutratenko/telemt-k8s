@@ -6,12 +6,11 @@ metadata:
     app.kubernetes.io/name: telemt
     app.kubernetes.io/part-of: telemt-k8s
 spec:
-  type: LoadBalancer
-  loadBalancerIP: 192.168.88.111
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: telemt
   ports:
     - name: mtproxy
-      port: 443
+      port: 8443
       targetPort: mtproxy
       protocol: TCP

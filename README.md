@@ -7,15 +7,39 @@ Kubernetes deployment for [Telemt](https://github.com/telemt/telemt) (MTProxy wi
 | Path | Purpose |
 |------|---------|
 | `argocd/` | Argo CD Application |
-| `deploy/` | Namespace, ConfigMap, Service (LoadBalancer), Deployment |
+| `deploy/` | Namespace, ConfigMap, Service (ClusterIP), Deployment, Ingress |
 | `secrets/` | Secret templates (no real values) |
 | `ops/` | Apply secrets and Argo CD Application |
 
 ## Architecture
 
-- External traffic hits `Service/telemt` on port **443** (LoadBalancer).
+- External traffic hits **nginx Ingress** on `cheeseburger.sion2k.ru:443` (shared ingress IP `192.168.88.9`).
+- Ingress uses **SSL passthrough** (raw TCP/TLS stream) to `Service/telemt:8443`.
 - Pod listens on **8443** (non-privileged port, no root, no `NET_BIND_SERVICE`).
 - Fake TLS masking domain: **sion2k.ru** (do not change after issuing client links).
+
+Requires `--enable-ssl-passthrough` on the cluster ingress controller (see below).
+
+## Prerequisites
+
+### DNS
+
+Add an A record:
+
+```
+cheeseburger.sion2k.ru  →  192.168.88.9
+```
+
+### Ingress controller
+
+SSL passthrough must be enabled once on the shared nginx ingress controller:
+
+```bash
+kubectl patch deployment shturval-ingress-controller-controller -n ingress --type='json' \
+  -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--enable-ssl-passthrough"}]'
+```
+
+Wait for the controller rollout to finish before testing the proxy.
 
 ## Quick start
 
@@ -45,10 +69,10 @@ cp secrets/telemt-secrets.env.example secrets/telemt-secrets.env
 ./ops/apply-argocd.sh
 ```
 
-5. Wait for sync and get external IP:
+5. Wait for sync and check status:
 
 ```bash
-kubectl get svc -n telemt telemt
+kubectl get ingress -n telemt telemt
 kubectl logs -n telemt -l app.kubernetes.io/name=telemt -f
 ```
 
@@ -67,30 +91,24 @@ Build Fake TLS secret (prefix `ee` + 32-char hex + domain hex):
 ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
 ```
 
-Example:
-
-```
-eed3001234567890abcdef1234567890ab73696f6e326b2e7275
-```
-
 Telegram link:
 
 ```
-tg://proxy?server=<LOAD_BALANCER_IP>&port=443&secret=ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
+tg://proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
 ```
 
 HTTPS link (for sharing):
 
 ```
-https://t.me/proxy?server=<LOAD_BALANCER_IP>&port=443&secret=ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
+https://t.me/proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
 ```
 
 ## Verify masking
 
-From a machine that can reach the LoadBalancer IP:
+From a machine that can reach the ingress IP:
 
 ```bash
-curl -v -I --resolve sion2k.ru:443:<LOAD_BALANCER_IP> https://sion2k.ru/
+curl -v -I --resolve sion2k.ru:443:192.168.88.9 https://sion2k.ru/
 ```
 
 You should see a valid TLS response from the real site (TCP splice), not a proxy error.

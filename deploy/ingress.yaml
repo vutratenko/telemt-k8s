@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: telemt
+  labels:
+    app.kubernetes.io/name: telemt
+    app.kubernetes.io/part-of: telemt-k8s
+  annotations:
+    cert-manager.io/cluster-issuer: corp-acme
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - cheeseburger.sion2k.ru
+      secretName: cheeseburger-sion2k-ru-tls
+  rules:
+    - host: cheeseburger.sion2k.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: telemt
+                port:
+                  number: 8443
