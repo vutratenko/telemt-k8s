@@ -16,9 +16,10 @@ Kubernetes deployment for [Telemt](https://github.com/telemt/telemt) (MTProxy wi
 - External traffic hits **nginx Ingress** on `cheeseburger.sion2k.ru:443` (shared ingress IP `192.168.88.9`).
 - Ingress uses **SSL passthrough** (raw TCP/TLS stream) to `Service/telemt:8443`.
 - Pod listens on **8443** (non-privileged port, no root, no `NET_BIND_SERVICE`).
-- Fake TLS masking domain: **sion2k.ru** (do not change after issuing client links).
+- Fake TLS SNI / client domain: **cheeseburger.sion2k.ru** (must match ingress host; do not change after issuing client links).
+- Unknown/probe traffic is spliced to the real **sion2k.ru** (`mask_host`), so it does not loop back into this ingress.
 
-Requires `--enable-ssl-passthrough` on the cluster ingress controller (see below).
+Requires `--enable-ssl-passthrough` on `shturval-ingress-controller` (via SSC / SSP), plus the per-Ingress annotation.
 
 ## Prerequisites
 
@@ -32,14 +33,7 @@ cheeseburger.sion2k.ru  →  192.168.88.9
 
 ### Ingress controller
 
-SSL passthrough must be enabled once on the shared nginx ingress controller:
-
-```bash
-kubectl patch deployment shturval-ingress-controller-controller -n ingress --type='json' \
-  -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--enable-ssl-passthrough"}]'
-```
-
-Wait for the controller rollout to finish before testing the proxy.
+Enable SSL passthrough in `shturval-ingress-controller` SSC/SSP (`controller.extraArgs.enable-ssl-passthrough`). Do not `kubectl patch` the Deployment — Helm/SSC will revert it.
 
 ## Quick start
 
@@ -78,29 +72,29 @@ kubectl logs -n telemt -l app.kubernetes.io/name=telemt -f
 
 ## Client link generation
 
-Mask domain `sion2k.ru` in hex:
+Mask domain `cheeseburger.sion2k.ru` in hex:
 
 ```bash
-echo -n "sion2k.ru" | xxd -p
-# 73696f6e326b2e7275
+echo -n "cheeseburger.sion2k.ru" | xxd -p
+# 6368656573656275726765722e73696f6e326b2e7275
 ```
 
 Build Fake TLS secret (prefix `ee` + 32-char hex + domain hex):
 
 ```
-ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
+ee<YOUR_32_HEX_SECRET>6368656573656275726765722e73696f6e326b2e7275
 ```
 
 Telegram link:
 
 ```
-tg://proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
+tg://proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>6368656573656275726765722e73696f6e326b2e7275
 ```
 
 HTTPS link (for sharing):
 
 ```
-https://t.me/proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>73696f6e326b2e7275
+https://t.me/proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>6368656573656275726765722e73696f6e326b2e7275
 ```
 
 ## Verify masking
@@ -108,10 +102,10 @@ https://t.me/proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_
 From a machine that can reach the ingress IP:
 
 ```bash
-curl -v -I --resolve sion2k.ru:443:192.168.88.9 https://sion2k.ru/
+curl -v -I --resolve cheeseburger.sion2k.ru:443:192.168.88.9 https://cheeseburger.sion2k.ru/
 ```
 
-You should see a valid TLS response from the real site (TCP splice), not a proxy error.
+Without the MTProxy secret you should see a TLS splice to the real `sion2k.ru` site, not a cert-manager certificate for `cheeseburger.sion2k.ru`.
 
 ## Metrics
 

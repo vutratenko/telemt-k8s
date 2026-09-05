@@ -19,10 +19,16 @@ data:
     metrics_port = 9090
     metrics_whitelist = ["0.0.0.0/0"]
 
+    [general.links]
+    public_host = "cheeseburger.sion2k.ru"
+    public_port = 443
+
     [censorship]
-    tls_domain = "sion2k.ru"
+    tls_domain = "cheeseburger.sion2k.ru"
     mask = true
+    mask_host = "sion2k.ru"
     mask_port = 443
+    unknown_sni_action = "mask"
     fake_cert_len = 2048
 
     [access.users]
