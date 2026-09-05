@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: telemt-config
+  labels:
+    app.kubernetes.io/name: telemt
+    app.kubernetes.io/part-of: telemt-k8s
+data:
+  telemt.toml.template: |
+    [general.modes]
+    classic = false
+    secure = false
+    tls = true
+
+    [server]
+    port = 8443
+    listen_addr_ipv4 = "0.0.0.0"
+    listen_addr_ipv6 = "::"
+    metrics_port = 9090
+    metrics_whitelist = ["0.0.0.0/0"]
+
+    [censorship]
+    tls_domain = "sion2k.ru"
+    mask = true
+    mask_port = 443
+    fake_cert_len = 2048
+
+    [access.users]
+    user1 = "${TELEMT_SECRET}"
