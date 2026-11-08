@@ -7,33 +7,31 @@ Kubernetes deployment for [Telemt](https://github.com/telemt/telemt) (MTProxy wi
 | Path | Purpose |
 |------|---------|
 | `argocd/` | Argo CD Application |
-| `deploy/` | Namespace, ConfigMap, Service (ClusterIP), Deployment, Ingress |
+| `deploy/` | Namespace, ConfigMap, Service (ClusterIP), Deployment |
 | `secrets/` | Secret templates (no real values) |
 | `ops/` | Apply secrets and Argo CD Application |
 
+Внешний вход **не** в этом репозитории: TLS passthrough и `TLSRoute` задаются в [sion2k-gateway](https://github.com/vutratenko/sion2k-gateway) (`ListenerSet/sion2k-app-listeners`, `dist/httproutes/telemt-tlsroute.yaml`).
+
 ## Architecture
 
-- External traffic hits **nginx Ingress** on `cheeseburger.sion2k.ru:443` (shared ingress IP `192.168.88.9`).
-- Ingress uses **SSL passthrough** (raw TCP/TLS stream) to `Service/telemt:8443`.
+- External traffic: `cheeseburger.sion2k.ru:443` → VIP платформенного Cilium Gateway **`shturval-gateway`** (`192.168.88.9`).
+- **TLS passthrough** (raw TCP+TLS): listener `tls-cheeseburger-sion2k-ru-passthrough` в `ListenerSet/sion2k-app-listeners` (`gateway-system`), `TLSRoute/telemt` → `Service/telemt:8443`.
 - Pod listens on **8443** (non-privileged port, no root, no `NET_BIND_SERVICE`).
-- Fake TLS SNI / client domain: **cheeseburger.sion2k.ru** (must match ingress host; do not change after issuing client links).
-- Unknown/probe traffic is spliced to the real **sion2k.ru** (`mask_host`), so it does not loop back into this ingress.
-
-Requires `--enable-ssl-passthrough` on `shturval-ingress-controller` (via SSC / SSP), plus the per-Ingress annotation.
+- Fake TLS SNI / client domain: **cheeseburger.sion2k.ru** (`tls_domain` / `public_host` in ConfigMap — do not change after issuing client links).
+- Unknown/probe handling and splice to **sion2k.ru** (`mask_host`) happen **inside telemt**, not on the Gateway.
 
 ## Prerequisites
 
 ### DNS
 
-Add an A record:
-
 ```
 cheeseburger.sion2k.ru  →  192.168.88.9
 ```
 
-### Ingress controller
+### Gateway API (sion2k-gateway)
 
-Enable SSL passthrough in `shturval-ingress-controller` SSC/SSP (`controller.extraArgs.enable-ssl-passthrough`). Do not `kubectl patch` the Deployment — Helm/SSC will revert it.
+Argo CD Application `sion2k-gateway` должен быть Synced: `ListenerSet` programmed, `TLSRoute` `telemt` — `Accepted` + `ResolvedRefs=True`. Не добавляйте HTTPS Terminate listener с cert-manager для этого hostname.
 
 ## Quick start
 
@@ -66,7 +64,8 @@ cp secrets/telemt-secrets.env.example secrets/telemt-secrets.env
 5. Wait for sync and check status:
 
 ```bash
-kubectl get ingress -n telemt telemt
+kubectl get tlsroute -n telemt telemt
+kubectl get endpoints -n telemt telemt
 kubectl logs -n telemt -l app.kubernetes.io/name=telemt -f
 ```
 
@@ -97,15 +96,25 @@ HTTPS link (for sharing):
 https://t.me/proxy?server=cheeseburger.sion2k.ru&port=443&secret=ee<YOUR_32_HEX_SECRET>6368656573656275726765722e73696f6e326b2e7275
 ```
 
-## Verify masking
+## Verify routing and proxy
 
-From a machine that can reach the ingress IP:
+**Kubernetes / Gateway API**
 
 ```bash
-curl -v -I --resolve cheeseburger.sion2k.ru:443:192.168.88.9 https://cheeseburger.sion2k.ru/
+kubectl get listenerset -n gateway-system sion2k-app-listeners -o jsonpath='{.status.listeners[?(@.name=="tls-cheeseburger-sion2k-ru-passthrough")].attachedRoutes}{"\n"}'
+# expect: 1
+kubectl get tlsroute -n telemt telemt -o jsonpath='{range .status.parents[0].conditions[*]}{.type}={.status}{"\n"}{end}'
 ```
 
-Without the MTProxy secret you should see a TLS splice to the real `sion2k.ru` site, not a cert-manager certificate for `cheeseburger.sion2k.ru`.
+**Negative check (край не терминирует TLS):** для SNI `cheeseburger.sion2k.ru` на `.9` не должен отдаваться платформенный/ACME-сертификат с CN=cheeseburger (в отличие от `openssl s_client -servername sion2k.ru -connect 192.168.88.9:443`, где виден CN=sion2k.ru).
+
+**Masking / curl:** обычный `curl https://cheeseburger.sion2k.ru/` без MTProxy-секрета может **не** завершить TLS handshake (Fake TLS на telemt — это не обычный HTTPS). Та же картина при прямом обращении к `telemt:8443` внутри кластера. Рабочий критерий для прокси — клиент Telegram с `ee…` ссылкой и/или активные сессии в логах (`ME key derivation`, `RPC handshake OK`).
+
+```bash
+VIP=192.168.88.9
+openssl s_client -connect ${VIP}:443 -servername cheeseburger.sion2k.ru -brief </dev/null
+# ожидаемо: нет валидного peer cert cheeseburger от Gateway; не subject=CN=sion2k.ru (это другой listener)
+```
 
 ## Metrics
 
