@@ -11,9 +11,11 @@ Kubernetes deployment for [Telemt](https://github.com/telemt/telemt) (MTProxy wi
 | `secrets/` | Secret templates (no real values) |
 | `ops/` | Apply secrets and Argo CD Application |
 
-Внешний вход **не** в этом репозитории: TLS passthrough и `TLSRoute` задаются в [sion2k-gateway](https://github.com/vutratenko/sion2k-gateway) (`ListenerSet/sion2k-app-listeners`, `dist/httproutes/telemt-tlsroute.yaml`).
+Внешний вход **не** в этом репозитории: **TLSRoute** (не HTTPRoute) и passthrough listener — в [sion2k-gateway](https://github.com/vutratenko/sion2k-gateway) (`ListenerSet/sion2k-app-listeners`, `dist/httproutes/telemt-tlsroute.yaml`). Описание схемы: [docs/telemt-shared-gateway.md](https://github.com/vutratenko/sion2k-gateway/blob/main/docs/telemt-shared-gateway.md).
 
 ## Architecture
+
+Раньше вход был через **nginx Ingress** `ssl-passthrough` на `.9`. Сейчас — **Cilium Gateway API** на том же VIP; nginx Ingress для telemt **не** используется.
 
 - External traffic: `cheeseburger.sion2k.ru:443` → тот же VIP, что и зонтик DNS (**`192.168.88.9`**, `shturval-gateway`). Envoy выбирает цепочку по **SNI**: для `cheeseburger` — TLS passthrough, для остальных хостов — HTTPS terminate.
 - **TLS passthrough** (L4, **не HTTPRoute**): listener в `ListenerSet/sion2k-app-listeners`, `TLSRoute/telemt` → `Service/telemt:8443` ([sion2k-gateway](https://github.com/vutratenko/sion2k-gateway)).
