@@ -15,8 +15,8 @@ Kubernetes deployment for [Telemt](https://github.com/telemt/telemt) (MTProxy wi
 
 ## Architecture
 
-- External traffic: `cheeseburger.sion2k.ru:443` → VIP **`192.168.88.114`** (отдельный Gateway `telemt-passthrough`, **не** общий `shturval-gateway` на `.9`). MTProto Fake TLS ломается в одном Envoy с десятками HTTPS-terminate listener'ов — как раньше на отдельном `public` Gateway.
-- **TLS passthrough** (L4, не HTTPRoute): `TLSRoute/telemt` → `Service/telemt:8443`. Манифесты в [sion2k-gateway](https://github.com/vutratenko/sion2k-gateway) (`05-gateway-telemt-passthrough.yaml`).
+- External traffic: `cheeseburger.sion2k.ru:443` → тот же VIP, что и зонтик DNS (**`192.168.88.9`**, `shturval-gateway`). Envoy выбирает цепочку по **SNI**: для `cheeseburger` — TLS passthrough, для остальных хостов — HTTPS terminate.
+- **TLS passthrough** (L4, **не HTTPRoute**): listener в `ListenerSet/sion2k-app-listeners`, `TLSRoute/telemt` → `Service/telemt:8443` ([sion2k-gateway](https://github.com/vutratenko/sion2k-gateway)).
 - Pod listens on **8443** (non-privileged port, no root, no `NET_BIND_SERVICE`).
 - Fake TLS SNI / client domain: **cheeseburger.sion2k.ru** (`tls_domain` / `public_host` in ConfigMap — do not change after issuing client links).
 - Unknown/probe handling and splice to **sion2k.ru** (`mask_host`) happen **inside telemt**, not on the Gateway.
@@ -26,10 +26,10 @@ Kubernetes deployment for [Telemt](https://github.com/telemt/telemt) (MTProxy wi
 ### DNS
 
 ```
-cheeseburger.sion2k.ru  →  192.168.88.114
+*.sion2k.ru / зонтик  →  192.168.88.9
 ```
 
-Если A-запись всё ещё на `.9`, клиенты Telegram попадают на `shturval-gateway` без passthrough для telemt — прокси «мёртв». Перенесите DNS (или DNAT только для `cheeseburger` на `.114`).
+Отдельный A-record на `cheeseburger` не обязателен: на gateway должны быть и HTTPS listeners, и passthrough listener для этого SNI.
 
 ### Gateway API (sion2k-gateway)
 
